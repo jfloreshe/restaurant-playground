@@ -26,6 +26,10 @@ export class InteractionController {
     this.dragElementId = 0;
     this.dragOffset = { x: 0, y: 0 };
     this.resizeHandle = null;
+    this.pointerDownHitId = 0;
+    this.pointerMoved = false;
+    this.pointerDownScreen = { x: 0, y: 0 };
+    this.clickMoveTolerance = 5;
 
     this.bindEvents();
   }
@@ -57,8 +61,11 @@ export class InteractionController {
     const screenX = event.offsetX;
     const screenY = event.offsetY;
     this.lastScreen = { x: screenX, y: screenY };
+    this.pointerDownScreen = { x: screenX, y: screenY };
     this.lastCell = this.camera.screenToCell(screenX, screenY);
     this.activePointerId = event.pointerId;
+    this.pointerMoved = false;
+    this.pointerDownHitId = 0;
     let shouldCapture = false;
 
     const panGesture =
@@ -78,11 +85,11 @@ export class InteractionController {
 
     const activeTool = this.getActiveTool();
     const hitId = this.store.getElementIdAtCell(this.lastCell.x, this.lastCell.y);
+    this.pointerDownHitId = hitId;
 
     if (hitId !== 0) {
       const element = this.store.elements.get(hitId);
       this.store.selectElement(hitId);
-      this.onElementSelected(hitId, element);
       const handle = this.getResizeHandleForPoint(element, screenX, screenY);
       this.dragElementId = hitId;
       shouldCapture = true;
@@ -147,17 +154,26 @@ export class InteractionController {
     const screenY = event.offsetY;
     const deltaX = screenX - this.lastScreen.x;
     const deltaY = screenY - this.lastScreen.y;
+    const fromDownX = screenX - this.pointerDownScreen.x;
+    const fromDownY = screenY - this.pointerDownScreen.y;
+    if (fromDownX * fromDownX + fromDownY * fromDownY > this.clickMoveTolerance * this.clickMoveTolerance) {
+      this.pointerMoved = true;
+    }
     const cell = this.camera.screenToCell(screenX, screenY);
 
     if (this.mode === "panning") {
       this.camera.panByPixels(deltaX, deltaY);
       this.requestRender();
     } else if (this.mode === "drag-element") {
-      const targetX = cell.x - this.dragOffset.x;
-      const targetY = cell.y - this.dragOffset.y;
-      this.store.moveElement(this.dragElementId, targetX, targetY);
+      if (this.pointerMoved) {
+        const targetX = cell.x - this.dragOffset.x;
+        const targetY = cell.y - this.dragOffset.y;
+        this.store.moveElement(this.dragElementId, targetX, targetY);
+      }
     } else if (this.mode === "resize-element") {
-      this.resizeActiveElement(cell);
+      if (this.pointerMoved) {
+        this.resizeActiveElement(cell);
+      }
     } else if (this.mode === "paint-wall" || this.mode === "erase-wall") {
       const fill = this.mode === "paint-wall";
       if (this.lastCell) {
@@ -175,10 +191,21 @@ export class InteractionController {
       return;
     }
 
+    if (!this.pointerMoved) {
+      const cell = this.camera.screenToCell(event.offsetX, event.offsetY);
+      const clickId = this.store.getElementIdAtCell(cell.x, cell.y) || this.pointerDownHitId;
+      if (clickId) {
+        this.onElementSelected(clickId, this.store.elements.get(clickId));
+      } else {
+        this.onElementSelected(0, null);
+      }
+    }
+
     this.activePointerId = null;
     this.mode = "idle";
     this.dragElementId = 0;
     this.resizeHandle = null;
+    this.pointerDownHitId = 0;
     this.canvas.style.cursor = "crosshair";
     if (this.canvas.hasPointerCapture(event.pointerId)) {
       this.canvas.releasePointerCapture(event.pointerId);

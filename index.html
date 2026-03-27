@@ -129,6 +129,8 @@
         display: block;
         cursor: crosshair;
         touch-action: none;
+        position: relative;
+        z-index: 1;
       }
 
       .label-layer {
@@ -136,6 +138,7 @@
         inset: 0;
         overflow: hidden;
         pointer-events: none;
+        z-index: 10;
       }
 
       .element-ui-shell {
@@ -284,6 +287,8 @@
 
       .table-tooltip {
         position: absolute;
+        top: 0;
+        left: 0;
         z-index: 30;
         display: none;
         gap: 8px;
