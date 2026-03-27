@@ -1,0 +1,25 @@
+export const CONFIG = {
+  gridWidth: 1000,
+  gridHeight: 1000,
+  initialZoom: 24,
+  minZoom: 3,
+  maxZoom: 140,
+  cameraPaddingCells: 120,
+  drawGridMinZoom: 10,
+  itemTypes: {
+    "rect-table": { w: 4, h: 2, minW: 2, minH: 1, maxW: 24, maxH: 24, sprite: "rect-table" },
+    "round-table": { w: 3, h: 3, minW: 2, minH: 2, maxW: 16, maxH: 16, sprite: "round-table" },
+    chair: { w: 1, h: 1, minW: 1, minH: 1, maxW: 4, maxH: 4, sprite: "chair" },
+    sign: { w: 2, h: 1, minW: 2, minH: 1, maxW: 12, maxH: 4, sprite: "sign" },
+  },
+  palette: {
+    background: "#0f1420",
+    gridMajor: "#2b3850",
+    gridMinor: "#1e293d",
+    wallFill: "#7083a5",
+    tableFill: "#f3a13a",
+    tableStroke: "#6f3a00",
+    selection: "#7bd0ff",
+    shadow: "rgba(0, 0, 0, 0.25)",
+  },
+};
