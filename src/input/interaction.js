@@ -7,7 +7,8 @@ export class InteractionController {
     getActiveTool,
     getSignText,
     getPlacementMeta,
-    onElementSelected
+    onElementSelected,
+    canEditLayout
   ) {
     this.canvas = canvas;
     this.store = store;
@@ -17,6 +18,7 @@ export class InteractionController {
     this.getSignText = getSignText;
     this.getPlacementMeta = getPlacementMeta || (() => ({ name: "", state: "open" }));
     this.onElementSelected = onElementSelected || (() => {});
+    this.canEditLayout = canEditLayout || (() => true);
 
     this.spaceDown = false;
     this.activePointerId = null;
@@ -84,10 +86,21 @@ export class InteractionController {
     }
 
     const activeTool = this.getActiveTool();
+    const canEdit = this.canEditLayout();
     const hitId = this.store.getElementIdAtCell(this.lastCell.x, this.lastCell.y);
     this.pointerDownHitId = hitId;
 
-    if (hitId !== 0) {
+    if (!canEdit) {
+      this.mode = "inspect-element";
+      shouldCapture = true;
+      if (hitId !== 0) {
+        this.store.selectElement(hitId);
+        this.canvas.style.cursor = "pointer";
+      } else {
+        this.store.selectElement(0);
+        this.canvas.style.cursor = "default";
+      }
+    } else if (hitId !== 0) {
       const element = this.store.elements.get(hitId);
       this.store.selectElement(hitId);
       const handle = this.getResizeHandleForPoint(element, screenX, screenY);
@@ -164,6 +177,8 @@ export class InteractionController {
     if (this.mode === "panning") {
       this.camera.panByPixels(deltaX, deltaY);
       this.requestRender();
+    } else if (this.mode === "inspect-element") {
+      // Read-only mode: selection remains click-based on pointerup.
     } else if (this.mode === "drag-element") {
       if (this.pointerMoved) {
         const targetX = cell.x - this.dragOffset.x;
@@ -319,16 +334,22 @@ export class InteractionController {
       return;
     }
 
+    const canEdit = this.canEditLayout();
     const cell = this.camera.screenToCell(event.offsetX, event.offsetY);
     const hitId = this.store.getElementIdAtCell(cell.x, cell.y);
     if (hitId === 0) {
-      this.canvas.style.cursor = "crosshair";
+      this.canvas.style.cursor = canEdit ? "crosshair" : "default";
       return;
     }
 
     const element = this.store.elements.get(hitId);
     if (!element) {
-      this.canvas.style.cursor = "crosshair";
+      this.canvas.style.cursor = canEdit ? "crosshair" : "default";
+      return;
+    }
+
+    if (!canEdit) {
+      this.canvas.style.cursor = "pointer";
       return;
     }
 

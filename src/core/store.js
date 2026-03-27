@@ -347,4 +347,141 @@ export class EditorStore {
     this.notifyChange();
     return true;
   }
+
+  exportLayout() {
+    const wallIndices = [];
+    for (let i = 0; i < this.wallCells.length; i += 1) {
+      if (this.wallCells[i] === 1) {
+        wallIndices.push(i);
+      }
+    }
+
+    const elements = [];
+    for (let i = 0; i < this.drawOrder.length; i += 1) {
+      const id = this.drawOrder[i];
+      const element = this.elements.get(id);
+      if (!element) {
+        continue;
+      }
+      elements.push({
+        id: element.id,
+        type: element.type,
+        x: element.x,
+        y: element.y,
+        w: element.w,
+        h: element.h,
+        label: element.label || "",
+        meta: {
+          name: element.meta?.name || "",
+          state: element.meta?.state || "open",
+          uiVariant: element.meta?.uiVariant ?? 0,
+        },
+      });
+    }
+
+    return {
+      version: 1,
+      gridWidth: this.gridWidth,
+      gridHeight: this.gridHeight,
+      wallIndices,
+      elements,
+      selectedElementId: this.selectedElementId,
+      nextElementId: this.nextElementId,
+    };
+  }
+
+  importLayout(snapshot = {}) {
+    const wallIndices = Array.isArray(snapshot.wallIndices) ? snapshot.wallIndices : [];
+    const elements = Array.isArray(snapshot.elements) ? snapshot.elements : [];
+
+    this.wallCells.fill(0);
+    this.elementOwner.fill(0);
+    this.elements.clear();
+    this.drawOrder = [];
+    this.selectedElementId = 0;
+    this.nextElementId = 1;
+
+    for (let i = 0; i < wallIndices.length; i += 1) {
+      const idx = Math.floor(Number(wallIndices[i]));
+      if (Number.isFinite(idx) && idx >= 0 && idx < this.wallCells.length) {
+        this.wallCells[idx] = 1;
+      }
+    }
+
+    let maxId = 0;
+    for (let i = 0; i < elements.length; i += 1) {
+      const raw = elements[i] || {};
+      const type = String(raw.type || "");
+      if (!this.itemTypes[type]) {
+        continue;
+      }
+
+      let w = Math.floor(Number(raw.w));
+      let h = Math.floor(Number(raw.h));
+      if (!Number.isFinite(w) || !Number.isFinite(h)) {
+        continue;
+      }
+
+      const constraints = this.getTypeConstraints(type);
+      w = clamp(w, constraints.minW, constraints.maxW);
+      h = clamp(h, constraints.minH, constraints.maxH);
+
+      let x = Math.floor(Number(raw.x));
+      let y = Math.floor(Number(raw.y));
+      if (!Number.isFinite(x) || !Number.isFinite(y)) {
+        continue;
+      }
+      x = clamp(x, 0, this.gridWidth - w);
+      y = clamp(y, 0, this.gridHeight - h);
+
+      let id = Math.floor(Number(raw.id));
+      if (!Number.isFinite(id) || id <= 0 || this.elements.has(id)) {
+        id = maxId + 1;
+        while (this.elements.has(id)) {
+          id += 1;
+        }
+      }
+
+      if (!this.canPlaceElement(x, y, w, h, id)) {
+        continue;
+      }
+
+      const rawMeta = raw.meta && typeof raw.meta === "object" ? raw.meta : {};
+      const isTable = type === "rect-table" || type === "round-table";
+      const normalizedName = normalizeName(rawMeta.name);
+
+      const element = {
+        id,
+        type,
+        x,
+        y,
+        w,
+        h,
+        label: type === "sign" ? String(raw.label || "").trim().slice(0, 12).toUpperCase() : "",
+        meta: {
+          name: normalizedName || (isTable ? `T${id}` : ""),
+          state: normalizeState(rawMeta.state),
+          uiVariant: normalizeVariant(rawMeta.uiVariant),
+        },
+      };
+
+      this.elements.set(id, element);
+      this.drawOrder.push(id);
+      this.stampElementOwner(id, x, y, w, h);
+      maxId = Math.max(maxId, id);
+    }
+
+    const selectedElementId = Math.floor(Number(snapshot.selectedElementId));
+    if (Number.isFinite(selectedElementId) && this.elements.has(selectedElementId)) {
+      this.selectedElementId = selectedElementId;
+    }
+
+    const hintedNext = Math.floor(Number(snapshot.nextElementId));
+    this.nextElementId = Math.max(
+      maxId + 1,
+      Number.isFinite(hintedNext) && hintedNext > 0 ? hintedNext : 1
+    );
+
+    this.notifyChange();
+  }
 }

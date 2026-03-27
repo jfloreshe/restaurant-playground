@@ -25,6 +25,20 @@ const TOOL_DEFS = [
 const app = document.getElementById("app");
 const sprites = createDefaultSprites();
 const instances = [];
+const LAYOUT_STORAGE_KEY = "poc-canvas.layout.v1";
+
+function downloadJson(filename, payload) {
+  const serialized = JSON.stringify(payload, null, 2);
+  const blob = new Blob([serialized], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
 
 function createEditorCard({ label, width, height }, index) {
   const card = document.createElement("section");
@@ -131,7 +145,13 @@ function isTableType(type) {
   return type === "rect-table" || type === "round-table";
 }
 
-function createTableMetaTooltip(viewport, store, camera, requestRender) {
+function createTableMetaTooltip(
+  viewport,
+  store,
+  camera,
+  requestRender,
+  getInteractionMode = () => "edit"
+) {
   const root = document.createElement("div");
   root.className = "table-tooltip";
   root.innerHTML = `
@@ -151,6 +171,7 @@ function createTableMetaTooltip(viewport, store, camera, requestRender) {
   `;
   viewport.appendChild(root);
 
+  const title = root.querySelector(".tip-title");
   const nameInput = root.querySelector(".tip-name");
   const stateSelect = root.querySelector(".tip-state");
   const applyBtn = root.querySelector(".tip-apply");
@@ -159,6 +180,19 @@ function createTableMetaTooltip(viewport, store, camera, requestRender) {
 
   let selectedId = 0;
   let visible = false;
+
+  function isViewMode() {
+    return getInteractionMode() !== "edit";
+  }
+
+  function syncEditability() {
+    const viewMode = isViewMode();
+    root.dataset.mode = viewMode ? "view" : "edit";
+    title.textContent = viewMode ? "Update Table State" : "Edit Table";
+    nameInput.disabled = viewMode;
+    applyBtn.style.display = viewMode ? "none" : "inline-block";
+    styleBtn.style.display = viewMode ? "none" : "inline-block";
+  }
 
   function hide() {
     visible = false;
@@ -170,14 +204,15 @@ function createTableMetaTooltip(viewport, store, camera, requestRender) {
     if (!selectedId) {
       return;
     }
-    store.updateElementMeta(selectedId, {
-      name: nameInput.value,
-      state: stateSelect.value,
-    });
+    const patch = { state: stateSelect.value };
+    if (!isViewMode()) {
+      patch.name = nameInput.value;
+    }
+    store.updateElementMeta(selectedId, patch);
   }
 
   function randomizeStyle() {
-    if (!selectedId) {
+    if (!selectedId || isViewMode()) {
       return;
     }
     store.updateElementMeta(selectedId, { uiVariant: Math.floor(Math.random() * 3) });
@@ -193,6 +228,7 @@ function createTableMetaTooltip(viewport, store, camera, requestRender) {
     root.style.display = "grid";
     nameInput.value = element.meta?.name || "";
     stateSelect.value = element.meta?.state || "open";
+    syncEditability();
     sync();
   }
 
@@ -200,6 +236,7 @@ function createTableMetaTooltip(viewport, store, camera, requestRender) {
     if (!visible || !selectedId) {
       return;
     }
+    syncEditability();
 
     const element = store.elements.get(selectedId);
     if (!element || !isTableType(element.type)) {
@@ -254,6 +291,7 @@ function setupInstance(preset, index) {
   const store = new EditorStore(CONFIG);
   const camera = new Camera2D(CONFIG);
   const renderer = new Renderer2D(ui.canvas, store, camera, CONFIG, sprites);
+  let interactionMode = "edit";
   const labels = new LabelOverlay(ui.viewport, store, camera, {
     minZoom: 0,
     getTemplate: (element) => {
@@ -270,7 +308,13 @@ function setupInstance(preset, index) {
       return null;
     },
   });
-  const tooltip = createTableMetaTooltip(ui.viewport, store, camera, requestRender);
+  const tooltip = createTableMetaTooltip(
+    ui.viewport,
+    store,
+    camera,
+    requestRender,
+    () => interactionMode
+  );
   const homeCenter = { x: 24 + index * 4, y: 16 };
 
   let activeTool = "paint-wall";
@@ -291,11 +335,36 @@ function setupInstance(preset, index) {
   }
 
   function setActiveTool(tool) {
+    if (interactionMode !== "edit") {
+      return;
+    }
     activeTool = tool;
     for (let i = 0; i < ui.buttons.length; i += 1) {
       const button = ui.buttons[i];
       button.dataset.active = button.dataset.tool === tool ? "true" : "false";
     }
+  }
+
+  function applyInteractionMode(mode) {
+    const nextMode = mode === "view" ? "view" : "edit";
+    interactionMode = nextMode;
+    const readOnly = interactionMode === "view";
+    ui.card.dataset.mode = nextMode;
+
+    for (let i = 0; i < ui.buttons.length; i += 1) {
+      ui.buttons[i].disabled = readOnly;
+    }
+    ui.signInput.disabled = readOnly;
+
+    if (readOnly) {
+      activeTool = "paint-wall";
+      for (let i = 0; i < ui.buttons.length; i += 1) {
+        ui.buttons[i].dataset.active = ui.buttons[i].dataset.tool === activeTool ? "true" : "false";
+      }
+    }
+
+    tooltip.sync();
+    requestRender();
   }
 
   for (let i = 0; i < ui.buttons.length; i += 1) {
@@ -353,7 +422,8 @@ function setupInstance(preset, index) {
         return;
       }
       tooltip.openFor(element);
-    }
+    },
+    () => interactionMode === "edit"
   );
 
   store.subscribe(() => requestRender());
@@ -368,8 +438,56 @@ function setupInstance(preset, index) {
     requestRender();
   }
 
+  function exportPayload(presetId) {
+    return {
+      version: 1,
+      savedAt: new Date().toISOString(),
+      presetId: presetId || null,
+      camera: {
+        x: camera.x,
+        y: camera.y,
+        zoom: camera.zoom,
+      },
+      layout: store.exportLayout(),
+    };
+  }
+
+  function loadPayload(payload) {
+    if (!payload || typeof payload !== "object" || !payload.layout) {
+      return false;
+    }
+
+    store.importLayout(payload.layout);
+
+    if (payload.camera && typeof payload.camera === "object") {
+      const nextZoom = clamp(
+        Number(payload.camera.zoom),
+        CONFIG.minZoom,
+        CONFIG.maxZoom
+      );
+      const nextX = Number(payload.camera.x);
+      const nextY = Number(payload.camera.y);
+      if (Number.isFinite(nextZoom)) {
+        camera.zoom = nextZoom;
+      }
+      if (Number.isFinite(nextX)) {
+        camera.x = nextX;
+      }
+      if (Number.isFinite(nextY)) {
+        camera.y = nextY;
+      }
+      camera.clampToBounds();
+      ui.zoomValue.value = String(Math.round(getZoomPercent()));
+    }
+
+    tooltip.hide();
+    requestRender();
+    return true;
+  }
+
   camera.setCenter(homeCenter.x, homeCenter.y);
   resize();
+  applyInteractionMode("edit");
 
   function applyViewportPreset(nextPreset) {
     ui.viewport.style.setProperty("--native-w", String(nextPreset.width));
@@ -381,6 +499,10 @@ function setupInstance(preset, index) {
   return {
     resize,
     applyViewportPreset,
+    exportPayload,
+    loadPayload,
+    setInteractionMode: (mode) => applyInteractionMode(mode),
+    getInteractionMode: () => interactionMode,
     stop: () => {
       if (rafId) {
         window.cancelAnimationFrame(rafId);
@@ -413,7 +535,20 @@ function buildPage() {
     presetSelect.appendChild(option);
   }
   presetSelect.value = PORTRAIT_PRESETS[0].id;
-  controls.append(presetLabel, presetSelect);
+
+  const saveBtn = document.createElement("button");
+  saveBtn.className = "tool-btn";
+  saveBtn.textContent = "Save / Export";
+
+  const loadBtn = document.createElement("button");
+  loadBtn.className = "tool-btn";
+  loadBtn.textContent = "Load (View)";
+
+  const modeBadge = document.createElement("span");
+  modeBadge.className = "mode-badge";
+  modeBadge.textContent = "Mode: EDIT";
+
+  controls.append(presetLabel, presetSelect, saveBtn, loadBtn, modeBadge);
 
   const sub = document.createElement("div");
   sub.className = "header-sub";
@@ -426,6 +561,55 @@ function buildPage() {
   const instance = setupInstance(PORTRAIT_PRESETS[0], 0);
   instances.push(instance);
 
+  function syncModeBadge() {
+    const mode = instance.getInteractionMode();
+    modeBadge.dataset.mode = mode;
+    modeBadge.textContent = mode === "view" ? "Mode: VIEW (state only)" : "Mode: EDIT";
+  }
+
+  saveBtn.addEventListener("click", () => {
+    const payload = instance.exportPayload(presetSelect.value);
+    try {
+      window.localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(payload));
+    } catch (error) {
+      console.error("Failed to save layout payload in localStorage", error);
+    }
+    downloadJson("restaurant-layout-export.json", payload);
+    syncModeBadge();
+  });
+
+  loadBtn.addEventListener("click", () => {
+    const serialized = window.localStorage.getItem(LAYOUT_STORAGE_KEY);
+    if (!serialized) {
+      window.alert("No saved layout found. Click Save / Export first.");
+      return;
+    }
+
+    let payload = null;
+    try {
+      payload = JSON.parse(serialized);
+    } catch (error) {
+      console.error("Invalid layout payload in localStorage", error);
+      window.alert("Saved layout payload is invalid JSON.");
+      return;
+    }
+
+    const preset = PORTRAIT_PRESETS.find((entry) => entry.id === payload?.presetId);
+    if (preset) {
+      presetSelect.value = preset.id;
+      instance.applyViewportPreset(preset);
+    }
+
+    const loaded = instance.loadPayload(payload);
+    if (!loaded) {
+      window.alert("Saved layout payload is missing required fields.");
+      return;
+    }
+
+    instance.setInteractionMode("view");
+    syncModeBadge();
+  });
+
   presetSelect.addEventListener("change", () => {
     const selected = PORTRAIT_PRESETS.find((preset) => preset.id === presetSelect.value);
     if (!selected) {
@@ -433,6 +617,8 @@ function buildPage() {
     }
     instance.applyViewportPreset(selected);
   });
+
+  syncModeBadge();
 }
 
 buildPage();
