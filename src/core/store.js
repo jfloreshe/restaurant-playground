@@ -2,6 +2,28 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+function normalizeState(value) {
+  const allowed = new Set(["open", "using", "reserved", "closed"]);
+  const candidate = String(value || "").trim().toLowerCase();
+  return allowed.has(candidate) ? candidate : "open";
+}
+
+function normalizeName(value) {
+  return String(value || "")
+    .trim()
+    .slice(0, 18)
+    .toUpperCase();
+}
+
+function normalizeVariant(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return Math.floor(Math.random() * 3);
+  }
+  const asInt = Math.floor(parsed);
+  return ((asInt % 3) + 3) % 3;
+}
+
 export class EditorStore {
   constructor({ gridWidth, gridHeight, itemTypes }) {
     this.gridWidth = gridWidth;
@@ -130,14 +152,29 @@ export class EditorStore {
     }
   }
 
-  addElement({ type, x, y, w, h, label = "" }) {
+  addElement({ type, x, y, w, h, label = "", meta = {} }) {
     if (!this.canPlaceElement(x, y, w, h)) {
       return 0;
     }
 
     const id = this.nextElementId;
     this.nextElementId += 1;
-    const element = { id, type, x, y, w, h, label };
+    const isTable = type === "rect-table" || type === "round-table";
+    const normalizedName = normalizeName(meta.name);
+    const element = {
+      id,
+      type,
+      x,
+      y,
+      w,
+      h,
+      label,
+      meta: {
+        name: normalizedName || (isTable ? `T${id}` : ""),
+        state: normalizeState(meta.state),
+        uiVariant: normalizeVariant(meta.uiVariant),
+      },
+    };
     this.elements.set(id, element);
     this.drawOrder.push(id);
     this.stampElementOwner(id, x, y, w, h);
@@ -146,11 +183,21 @@ export class EditorStore {
     return id;
   }
 
-  addItemAt(type, x, y, label = "") {
+  addItemAt(type, x, y, options = {}) {
     const definition = this.itemTypes[type];
     if (!definition) {
       return 0;
     }
+
+    const normalizedOptions =
+      typeof options === "string"
+        ? { label: options, name: "", state: "open", uiVariant: null }
+        : {
+            label: options.label || "",
+            name: options.name || "",
+            state: options.state || "open",
+            uiVariant: options.uiVariant,
+          };
 
     const clampedX = clamp(x, 0, this.gridWidth - definition.w);
     const clampedY = clamp(y, 0, this.gridHeight - definition.h);
@@ -160,7 +207,15 @@ export class EditorStore {
       y: clampedY,
       w: definition.w,
       h: definition.h,
-      label: type === "sign" ? label.trim().slice(0, 12).toUpperCase() : "",
+      label:
+        type === "sign"
+          ? String(normalizedOptions.label).trim().slice(0, 12).toUpperCase()
+          : "",
+      meta: {
+        name: normalizedOptions.name,
+        state: normalizedOptions.state,
+        uiVariant: normalizedOptions.uiVariant,
+      },
     });
   }
 
@@ -261,5 +316,35 @@ export class EditorStore {
     }
     this.selectedElementId = id;
     this.notifyChange();
+  }
+
+  updateElementMeta(id, patch = {}) {
+    const element = this.elements.get(id);
+    if (!element) {
+      return false;
+    }
+
+    const nextName =
+      patch.name === undefined ? element.meta.name : normalizeName(patch.name);
+    const nextState =
+      patch.state === undefined ? element.meta.state : normalizeState(patch.state);
+    const nextVariant =
+      patch.uiVariant === undefined
+        ? element.meta.uiVariant
+        : normalizeVariant(patch.uiVariant);
+
+    if (
+      nextName === element.meta.name &&
+      nextState === element.meta.state &&
+      nextVariant === element.meta.uiVariant
+    ) {
+      return false;
+    }
+
+    element.meta.name = nextName;
+    element.meta.state = nextState;
+    element.meta.uiVariant = nextVariant;
+    this.notifyChange();
+    return true;
   }
 }

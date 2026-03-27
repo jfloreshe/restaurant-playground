@@ -1,11 +1,22 @@
 export class InteractionController {
-  constructor(canvas, store, camera, requestRender, getActiveTool, getSignText) {
+  constructor(
+    canvas,
+    store,
+    camera,
+    requestRender,
+    getActiveTool,
+    getSignText,
+    getPlacementMeta,
+    onElementSelected
+  ) {
     this.canvas = canvas;
     this.store = store;
     this.camera = camera;
     this.requestRender = requestRender;
     this.getActiveTool = getActiveTool;
     this.getSignText = getSignText;
+    this.getPlacementMeta = getPlacementMeta || (() => ({ name: "", state: "open" }));
+    this.onElementSelected = onElementSelected || (() => {});
 
     this.spaceDown = false;
     this.activePointerId = null;
@@ -71,6 +82,7 @@ export class InteractionController {
     if (hitId !== 0) {
       const element = this.store.elements.get(hitId);
       this.store.selectElement(hitId);
+      this.onElementSelected(hitId, element);
       const handle = this.getResizeHandleForPoint(element, screenX, screenY);
       this.dragElementId = hitId;
       shouldCapture = true;
@@ -91,6 +103,7 @@ export class InteractionController {
       if (activeTool === "paint-wall" || activeTool === "erase-wall") {
         this.mode = activeTool;
         shouldCapture = true;
+        this.onElementSelected(0, null);
         this.store.paintWallLine(
           this.lastCell.x,
           this.lastCell.y,
@@ -101,7 +114,15 @@ export class InteractionController {
       } else {
         this.mode = "idle";
         const signText = this.getSignText();
-        this.store.addItemAt(activeTool, this.lastCell.x, this.lastCell.y, signText);
+        const newId = this.store.addItemAt(activeTool, this.lastCell.x, this.lastCell.y, {
+          label: signText,
+          ...this.getPlacementMeta(),
+        });
+        if (newId) {
+          this.onElementSelected(newId, this.store.elements.get(newId));
+        } else {
+          this.onElementSelected(0, null);
+        }
         this.activePointerId = null;
       }
     }
