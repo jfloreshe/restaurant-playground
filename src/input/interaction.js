@@ -25,9 +25,6 @@ export class InteractionController {
     this.canvas.addEventListener("pointermove", (event) => this.onPointerMove(event));
     this.canvas.addEventListener("pointerup", (event) => this.onPointerUp(event));
     this.canvas.addEventListener("pointercancel", (event) => this.onPointerUp(event));
-    this.canvas.addEventListener("wheel", (event) => this.onWheel(event), {
-      passive: false,
-    });
     window.addEventListener("keydown", (event) => this.onKeyDown(event));
     window.addEventListener("keyup", (event) => this.onKeyUp(event));
   }
@@ -166,12 +163,6 @@ export class InteractionController {
       this.canvas.releasePointerCapture(event.pointerId);
     }
     this.updateHoverCursor(event);
-    this.requestRender();
-  }
-
-  onWheel(event) {
-    event.preventDefault();
-    this.camera.zoomAt(event.offsetX, event.offsetY, event.deltaY);
     this.requestRender();
   }
 

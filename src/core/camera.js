@@ -70,6 +70,15 @@ export class Camera2D {
     this.clampToBounds();
   }
 
+  setZoomAt(screenX, screenY, nextZoom) {
+    const worldBefore = this.screenToWorld(screenX, screenY);
+    this.zoom = clamp(nextZoom, this.minZoom, this.maxZoom);
+    const worldAfter = this.screenToWorld(screenX, screenY);
+    this.x += worldBefore.x - worldAfter.x;
+    this.y += worldBefore.y - worldAfter.y;
+    this.clampToBounds();
+  }
+
   getVisibleCellRange() {
     const startX = Math.floor(this.x);
     const startY = Math.floor(this.y);
